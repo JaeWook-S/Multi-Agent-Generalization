@@ -1,3 +1,18 @@
+"""
+    환경·모델·데이터·학습기를 연결하고, 언제 학습·평가·저장할지 관리하는 파일
+    run()
+    → run_sequential()
+        → init_tasks(): 과제별 환경과 데이터 규격 준비
+        → 공유 controller와 learner 생성
+        → checkpoint가 있으면 로딩
+            → 평가 전용이면 평가하고 종료
+        → OfflineBuffer 생성
+        → train_sequential()
+            → 학습 전 평가
+            → 배치 학습 반복
+            → 주기적 평가·저장
+        → 최종 모델 저장
+"""
 import os
 import pprint
 import time
@@ -20,11 +35,13 @@ from components.transforms import OneHot
 
 import numpy as np
 
-
+# 설정과 실행 기록을 준비
 def run(_run, _config, _log):
     # check args sanity
+    # cuda 사용할 수 없으면 use_cuda=False로 변경 / 평가 횟수를 batch_size_run의 배수로 맞춤
     _config = args_sanity_check(_config, _log)
 
+    # SN : _config["batch_size"] -> args.batch_size로 변환해줌
     args = SN(**_config)
     args.device = "cuda" if args.use_cuda else "cpu"
 
@@ -88,7 +105,7 @@ def evaluate_sequential(main_args, logger, task2runner):
     logger.log_stat("episode", 0, 0)
     logger.print_recent_stats()
 
-
+""" task별 설정과 환경을 만드는 함수"""
 def init_tasks(task_list, main_args, logger):
     task2args, task2runner, task2buffer = {}, {}, {}
     task2scheme, task2groups, task2preprocess = {}, {}, {}
@@ -199,6 +216,7 @@ def train_sequential(
         n_test_runs = 0
     test_start_time = time.time()
 
+    # 첫 배치 학습 전에 평가
     with th.no_grad():
         for task in main_args.test_tasks:
             task2runner[task].t_env = t_env
@@ -331,13 +349,14 @@ def run_sequential(args, logger):
     task2buffer_scheme = {task: task2buffer[task].scheme for task in all_tasks}
 
     # define mac
-    mac = mac_REGISTRY[main_args.mac](
+    mac = mac_REGISTRY[main_args.mac]( # 모든 평가 runner에 하나의 공유 controller를 연결
         train_tasks=all_tasks,
         task2scheme=task2buffer_scheme,
         task2args=task2args,
         main_args=main_args,
     )
 
+    # controller를 한 번 생성 -> 과제마다 완전히 별개의 정책을 만드는 구조가 아님
     for task in main_args.test_tasks:
         task2runner[task].setup(
             scheme=task2scheme[task],

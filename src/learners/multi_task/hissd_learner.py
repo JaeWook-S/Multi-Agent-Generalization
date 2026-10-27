@@ -18,7 +18,7 @@ import os
 class HISSDLearner:
     def __init__(self, mac, logger, main_args):
         self.main_args = main_args
-        self.mac = mac
+        self.mac = mac # HISSDAgent를 가지고 있고, 내부의 Planner, Discriminator, ValueNet을 호출 연결
         self.logger = logger
 
         # get some attributes from mac
@@ -27,7 +27,8 @@ class HISSDLearner:
         self.surrogate_decomposer = mac.surrogate_decomposer
         self.task2decomposer = mac.task2decomposer
 
-        self.params = list(mac.parameters())
+        # mac이 가진 신경망 파라미터들을 학습 대상으로 모음
+        self.params = list(mac.parameters()) 
 
         self.last_target_update_episode = 0
 
@@ -35,11 +36,11 @@ class HISSDLearner:
         if main_args.mixer is not None:
             if main_args.mixer == "vdn":
                 self.mixer = VDNMixer()
-            elif main_args.mixer == "mt_qattn":
+            elif main_args.mixer == "mt_qattn": # 현재는 해당 mixer 사용
                 self.mixer = MTAttnQMixer(self.surrogate_decomposer, main_args)
             else:
                 raise ValueError(f"Mixer {main_args.mixer} not recognised.")
-            self.params += list(self.mixer.parameters())
+            self.params += list(self.mixer.parameters()) # mixer도 학습 대상에 포함 
             self.target_mixer = copy.deepcopy(self.mixer)
 
         self._reset_optimizer()
@@ -60,20 +61,20 @@ class HISSDLearner:
                 -task_args.learner_log_interval - 1
             )
 
-        self.c = main_args.c_step
+        self.c = main_args.c_step # 공통 스킬 갱신 및 미래 참조 간격
         self.skill_dim = main_args.skill_dim
-        self.beta = main_args.beta
+        self.beta = main_args.beta # 표현 학습 손실의 비중
         self.alpha = main_args.coef_conservative
         self.phi = main_args.coef_dist
         self.kl_weight = main_args.coef_kl
         self.entity_embed_dim = main_args.entity_embed_dim
         self.device = None
-        self.ssl_type = main_args.ssl_type
+        self.ssl_type = main_args.ssl_type # 대조 학습 경로 선택
         self.ssl_tw = main_args.ssl_time_window
-        self.double_neg = main_args.double_neg
-        self.td_weight = main_args.td_weight
+        self.double_neg = main_args.double_neg # task별 최근 batch를 유지
+        self.td_weight = main_args.td_weight # planner 학습 가중치의 민감도
         self.adaptation = main_args.adaptation
-        self.epsilon = main_args.epsilon
+        self.epsilon = main_args.epsilon # value loss의 비대칭 계수
 
         self.pretrain_steps = 0
         self.training_steps = 0
@@ -127,9 +128,9 @@ class HISSDLearner:
         self.optimiser.zero_grad()
 
     def update(self, pretrain=True):
-        grad_norm = th.nn.utils.clip_grad_norm_(
+        grad_norm = th.nn.utils.clip_grad_norm_( # 기울기가 지나치게 커졌을 때 크기를 제한
             self.params, self.main_args.grad_norm_clip
-        )
+        ) 
         if pretrain:
             self.pre_optimiser.step()
             self.pre_optimiser.zero_grad()
@@ -164,6 +165,7 @@ class HISSDLearner:
             self.last_batch[cur_task] = cur_batch
         self.last_task = cur_task
 
+    """ 다른 task에서 에이전트 하나를 고른 후, 여러 시간의 표현을 모아 negative로 사용 """
     def compute_neg_sample(self, batch, task):
         target_outs = []
         agent_random = random.randint(0, self.task2n_agents[task] - 1)
@@ -180,7 +182,12 @@ class HISSDLearner:
         )
 
         return target_outs
-
+    
+    """ 
+        VAE : 중간 벡터 하나를 바로 출력하는 대신 중간 벡터가 따를 확률분포를 출력 
+        -> 그 분포에서 z를 뽑고 decoder에 넣는다
+        L_controller = L_행동모방 + beta*L_task표현학습
+    """
     def train_vae(
         self,
         batch: EpisodeBatch,
@@ -189,25 +196,30 @@ class HISSDLearner:
         task: str,
         ssl_loss=None,
     ):
-        rewards = batch["reward"][:, :]
-        actions = batch["actions"][:, :]
+        # batch에서 필요한 데이터 꺼냄
+        rewards = batch["reward"][:, :] # [B, T, 1]
+        actions = batch["actions"][:, :] # [B, T, N, 1] 모방할 행동 정답
         terminated = batch["terminated"][:, :].float()
-        mask = batch["filled"][:, :].float()
+        mask = batch["filled"][:, :].float() # filled : 실제 데이터가 들어있는 시간 위치를 표시
         mask[:, 1:] = mask[:, 1:] * (1 - terminated[:, :-1])
-        avail_actions = batch["avail_actions"]
+        avail_actions = batch["avail_actions"] # [B, T, N, A]
 
         dec_loss = 0.0
         b, t, n = actions.shape[0], actions.shape[1], actions.shape[2]
-        self.mac.init_hidden(batch.batch_size, task)
+        # 신경망 가중치 초기화 x -> batch의 에피소드들을 처음부터 읽기 위해 기억 상태를 초기화
+        self.mac.init_hidden(batch.batch_size, task) # hidden state init
         t = 0
         while t < batch.max_seq_length - self.c:
             act_outs = []
+            # 시간 순서로 행동을 예측 -> common skill c
             agent_outs, _ = self.mac.forward_planner(
                 batch, t=t, task=task, actions=actions[:, t], hrl=True
             )
             act_agent_outs = self.mac.forward_planner_feedforward(agent_outs)
             for i in range(self.c):
+                # task-specific skill z
                 _, discr_h = self.mac.forward_discriminator(batch, t=t + i, task=task)
+                # decoder가 행동 점수를 출력
                 act_out, _ = self.mac.forward_global_action(
                     batch, act_agent_outs, discr_h, t + i, task
                 )
@@ -224,6 +236,9 @@ class HISSDLearner:
             ) / n
             t += self.c
 
+        # contrastive learning 
+        # 이 표현과 비슷해야 하는 것은 무엇인가? vs 이 표현과 구분돼야 하는 것은 무엇인가?
+        # task의 특징을 잘 구분하는 표현이 만들어지기 위해서
         if (
             len(self.last_batch) != 0
             and self.ssl_type == "moco"
@@ -232,16 +247,20 @@ class HISSDLearner:
             ssl_loss = 0.0
             self.mac.init_hidden(batch.batch_size, task)
 
+            # 서로 다른 두 에이전트를 고르고 시간 하나를 선택
+            # 같은 에피, 시간, task -> 에이전트 i : query / 에이전트 j : positive
             cur_random = random.randint(0, self.task2n_agents[task] - 1)
             pos_random = random.randint(0, self.task2n_agents[task] - 1)
             while pos_random == cur_random:
                 pos_random = random.randint(0, self.task2n_agents[task] - 1)
             cur_t = random.randint(0, batch.max_seq_length - self.c - 1)
 
-            mac_out, _ = self.mac.forward_discriminator(batch, t=cur_t, task=task)
-            cur_out, pos_out = mac_out[:, cur_random], mac_out[:, pos_random]
+            # contrastive learning용 출력 
+            mac_out, _ = self.mac.forward_discriminator(batch, t=cur_t, task=task) # mac_out : [B, N, D]
+            cur_out, pos_out = mac_out[:, cur_random], mac_out[:, pos_random] # [B, D]
 
             total_target = []
+            # 다른 task의 데이터는 last_batch에서 가져옴
             for i, task_ in enumerate(self.last_batch):
                 if task_ == task:
                     continue
@@ -380,11 +399,13 @@ class HISSDLearner:
         target_values = th.stack(target_values, dim=1)
         rewards = rewards.reshape(-1, batch.max_seq_length, 1)
 
+        # mixer : [B, T, N, 1] -> [B, T, 1]
         if self.mixer is not None:
             mixed_values = self.mixer(
                 values, batch["state"][:, :], self.task2decomposer[task]
             )
             with th.no_grad():
+                # target 쪽도 같은 구조로 계산하지만 기울기는 안보냄
                 target_mixed_values = self.target_mixer(
                     target_values, batch["state"][:, :], self.task2decomposer[task]
                 ).detach()
@@ -405,6 +426,7 @@ class HISSDLearner:
             * (1 - terminated[:, self.c - 1 : -1])
             * target_mixed_values[:, self.c :].detach()
         )
+        # 유효한 시간 위치에서만 오차를 남김
         mask = mask.expand_as(mixed_values)
         masked_td_error = td_error * mask[:, : -self.c]
 
@@ -626,6 +648,7 @@ class HISSDLearner:
                 ssl_loss=th.tensor(0.0),
             )
         else:
+            # train_vae : 데이터의 행동을 따라하고, task를 구분하는 표현을 학습 
             dec_loss, ssl_loss = self.train_vae(batch, t_env, episode_num, task)
             self.update_last_batch(task, batch)
             self.update(pretrain=False)

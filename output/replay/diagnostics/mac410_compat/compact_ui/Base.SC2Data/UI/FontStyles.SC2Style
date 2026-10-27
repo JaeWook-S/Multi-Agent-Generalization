@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<StyleFile>
+    <Style name="HiSSDCompactMessage" template="InternationalTemplate"
+           font="#FontStandard" height="16" vjustify="Top" hjustify="Left"
+           styleflags="Shadow" textcolor="220,220,220,220" shadowoffset="1"/>
+</StyleFile>

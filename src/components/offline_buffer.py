@@ -4,7 +4,18 @@ import torch as th
 import numpy as np
 import h5py
 from sys import stderr
+"""
+    obs : [B, T, N, obs_dim]
+    state : [B, T, state_dim]
+    actions : [B, T, N, 1]
+    actions_onehot [B, T, N, A]
+    avail_actions : [B, T, N, A]
+    reward, terminated, filled : [B, T, 1]
+"""
 
+""" 
+    추출한 배치를 learner가 사용할 형태로 포장 
+"""
 class OfflineSample():
     def __init__(self, data, batch_size, max_seq_length, device="cpu"):
         self.batch_size = batch_size
@@ -70,6 +81,7 @@ class OfflineBufferH5FullData():
         return batch_sample
 
 
+""" HDF5 데이터 로딩, 에피소드 추출 """
 class OfflineBufferH5():
     def __init__(self, datapaths, offline_data_size=2000, device="cpu", random_sample=True):
         offline_data_size = 100000000 if offline_data_size <= 0 else offline_data_size
@@ -95,11 +107,12 @@ class OfflineBufferH5():
                 for k in f.keys():
                     if k not in data:
                         data[k] = f[k][:]
-                    else:
+                    else: # 파일이 여러 개라면 axis=0 (에피소드) 축으로 붙임
                         data[k] = np.concatenate((data[k], f[k][:]), axis=0)
                     
             # pre-slice for memory releasing
             if not random_sample and data[list(data.keys())[0]].shape[0] > offline_data_size:
+                # 제한보다 많아지면 뒤쪽 에피소드들을 남김
                 data = {k: v[-offline_data_size:] for k, v in data.items()}
 
         keys = list(data.keys())
@@ -122,7 +135,7 @@ class OfflineBufferH5():
         ep_ids = np.random.choice(self.episodes_in_buffer, batch_size, replace=False)
         episode_data = {k: th.tensor(v[ep_ids]) for k, v in self.data.items()}
         filled = episode_data['filled']
-        max_ep_t = self.max_t_filled(filled).item()
+        max_ep_t = self.max_t_filled(filled).item() # 서로 다른 에피소드 길이를 동일하게 맞추기 위해
         batch_sample = OfflineSample(episode_data, batch_size, max_ep_t, device=self.device)
         return batch_sample
 
@@ -178,6 +191,7 @@ class OfflineBufferPickle():
         return batch_sample
 
 
+""" 데이터 위치와 파일 형식 선택 """
 class OfflineBuffer():
     def __init__(self, map_name, quality, data_folder=None, dataset_folder='dataset', offline_data_size=2000, device="cpu", random_sample=True):
         datapaths = []
@@ -203,6 +217,7 @@ class OfflineBuffer():
         datapath = os.path.join(dataset_folder, map_name, quality)
         assert os.path.exists(datapath), "Offline data path {} does not exist".format(datapath)
 
+        # data_folder가 빈 문자열이면 하위 폴더를 정렬해서 마지막 폴더 선택
         if data_folder is None or data_folder == '':
             existing_folders = [ f for f in sorted(os.listdir(datapath)) if os.path.isdir(os.path.join(datapath, f)) ]
             assert len(existing_folders) > 0

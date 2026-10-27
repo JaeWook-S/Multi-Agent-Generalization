@@ -4,7 +4,7 @@ import datetime
 import collections
 from os.path import dirname, abspath
 from copy import deepcopy
-from sacred import Experiment, SETTINGS
+from sacred import Experiment, SETTINGS # 설정, 로그, 실행 결과를 기록하는 실험 관리 도구
 from sacred.observers import FileStorageObserver
 from sacred.utils import apply_backspaces_and_linefeeds
 import sys
@@ -19,19 +19,22 @@ from mto import run as mto
 SETTINGS['CAPTURE_MODE'] = "fd" # set to "no" if you want to see stdout/stderr in console
 logger = get_logger()
 
-ex = Experiment("MOCO")
+ex = Experiment("MOCO") # 실험 객체 이름 
 ex.logger = logger
 ex.captured_out_filter = apply_backspaces_and_linefeeds
 
 results_path = os.path.join(dirname(dirname(abspath(__file__))), "results")
 
-
+# run_commandline 함수 실행 이후 다음의 등록된 함수가 실행됨 
 @ex.main
 def my_main(_run, _config, _log):
+    # _run : 현재 실험 실행 객체, 지표 기록 등에 사용
+    # _config : 최종 설정
+    # _log : 로그 출력 객체
     # Setting the random seed throughout the modules
     config = config_copy(_config)
-    np.random.seed(config["seed"])
-    th.manual_seed(config["seed"])
+    np.random.seed(config["seed"]) # numpy
+    th.manual_seed(config["seed"]) # pytorch 
     config['env_args']['seed'] = config["seed"]
 
     # run the framework
@@ -115,7 +118,7 @@ if __name__ == '__main__':
 
     # read the run file
     run_file = _get_run_file(params)
-    config_dict['run_file'] = run_file
+    config_dict['run_file'] = run_file # 실행 경로 
 
     # Load algorithm base configs
     alg_config = _get_config(params, "--config", "algs")
@@ -135,6 +138,7 @@ if __name__ == '__main__':
     if "map_name" in config_dict:
         config_dict["env_args"]["map_name"] = config_dict["map_name"]
 
+    # 결과 저장 폴더 만들기
     # get result path
     if 'remark' in config_dict:
         config_dict['remark'] = '_' + config_dict['remark']
@@ -171,6 +175,6 @@ if __name__ == '__main__':
     logger.info("Saving to FileStorageObserver in {}.".format(file_obs_path))
 
     # now add all the config to sacred
-    ex.add_config(config_dict)
+    ex.add_config(config_dict) # 지금까지 합친 설정을 Sacred에 등록
 
-    ex.run_commandline(params)
+    ex.run_commandline(params) # Sacred를 통해 실험 시작

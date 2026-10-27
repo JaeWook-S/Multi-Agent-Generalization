@@ -3,7 +3,20 @@ from functools import partial
 from components.episode_buffer import EpisodeBatch
 import numpy as np
 
-
+""" 
+    정책을 사용해서 게임 한 판을 진행하고, 그 과정을 기록 
+            게임 초기화
+            ↓
+            현재 관측·state·가능한 행동을 기록
+            ↓
+            mac에 행동 선택 요청
+            ↓
+            선택한 행동을 게임에 실행
+            ↓
+            보상·종료 여부 기록
+            ↓
+            게임이 끝날 때까지 반복
+"""
 class EpisodeRunner:
 
     def __init__(self, args, logger, task):
@@ -22,9 +35,9 @@ class EpisodeRunner:
                 reward_scalarisation=self.args.reward_scalarisation,
             )
         self.episode_limit = self.env.episode_limit
-        self.t = 0
+        self.t = 0 # 현재 게임 안에서 몇 스텝 진행했는가
 
-        self.t_env = 0
+        self.t_env = 0 # 현재 정책이 어느 학습 시점의 정책인지 
 
         self.train_returns = []
         self.test_returns = []
@@ -34,7 +47,9 @@ class EpisodeRunner:
         # Log the first run
         self.log_train_stats_t = -1000000
 
+    """ 기록 양식과 공유 mac 연결 """
     def setup(self, scheme, groups, preprocess, mac):
+        # partial : 인자를 미리 채운 함수를 만드는 도구 / 게임 기록용 빈 배치를 만드는 함수
         self.new_batch = partial(
             EpisodeBatch,
             scheme,
@@ -65,20 +80,22 @@ class EpisodeRunner:
 
         terminated = False
         episode_return = 0
-        self.mac.init_hidden(batch_size=self.batch_size, task=self.task)
+        # 이전 게임에서 이어진 hidden state 초기화
+        self.mac.init_hidden(batch_size=self.batch_size, task=self.task) 
 
         while not terminated:
 
             pre_transition_data = {
-                "state": [self.env.get_state()],
-                "avail_actions": [self.env.get_avail_actions()],
-                "obs": [self.env.get_obs()],
+                "state": [self.env.get_state()], # 팀 전체의 global state
+                "avail_actions": [self.env.get_avail_actions()], # 각 에이전트가 현재 실행할 수 있는 행동 표시
+                "obs": [self.env.get_obs()], # 각 에이전트의 local obs
             }
 
             self.batch.update(pre_transition_data, ts=self.t)
 
             # Pass the entire batch of experiences up till now to the agents
             # Receive the actions for each agent at this timestep in a batch of size 1
+            # [B, N]
             actions = self.mac.select_actions(
                 self.batch,
                 t_ep=self.t,
@@ -100,6 +117,7 @@ class EpisodeRunner:
 
             self.t += 1
 
+        # 게임 종료 후의 마지막 관측도 저장
         last_data = {
             "state": [self.env.get_state()],
             "avail_actions": [self.env.get_avail_actions()],

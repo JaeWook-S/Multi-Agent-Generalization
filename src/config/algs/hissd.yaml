@@ -10,10 +10,11 @@ epsilon_anneal_time: 50000
 target_update_interval: 80
 
 # use the Q_Learner to train
-agent_output_type: "q"
+agent_output_type: "q" # 행동을 확률로 출력할지, 점수로 출력할지 -> q면 softmax 적용 안함
 learner: "hissd_learner"
 double_q: True
-mixer: "mt_qattn"
+
+mixer: "mt_qattn" # 각 에이전트가 계산한 value를 하나의 팀 value로 합치는 신경망
 mixing_embed_dim: 32
 hypernet_layers: 2
 hypernet_embed: 64
@@ -24,15 +25,16 @@ name: "mto"
 agent: "mt_hissd"
 
 # mac
+# agent : 신경망 / mac : 그 신경망을 어떻게 호출하고 사용할지 관리하는 코드
 mac: "mt_hissd_mac"
 optim_type: "AdamW" # Optimizer type
 
 # params about trans mixing network
-entity_embed_dim: 64
-attn_embed_dim: 8
-skill_dim: 64
+entity_embed_dim: 64 # 주요 유닛 표현과 hidden state 차원
+attn_embed_dim: 8 # mixer,재구성 모듈 등의 q,k 계산 차원
+skill_dim: 64 
 task: 3
-c_step: 1
+c_step: 1 # palnner의 표현을 새로 계산하는 간격, 학습에서 미래 상태와 보상을 참조하는 시간 간격에도 사용
 # beta: 0.001
 beta: 0.05
 coef_conservative: 5.0
@@ -41,11 +43,11 @@ pretrain_steps: 20000
 pretrain: False
 weight_decay: 0.0001
 
-head: 1
-depth: 1
+head: 1 # 주요 transformer의 attention head 수
+depth: 1 # 주요 transformer의 블록 수
 
 # params about observation decomposition
-id_length: 4
+id_length: 4 # 에이전트 ID를 4자리 이진 벡터로 표현
 max_agent: 15
 
 # params about ensemble loss
@@ -65,11 +67,11 @@ vq_skill: False
 code_dim: 16
 
 # discriminator params
-ssl_type: "moco"
+ssl_type: "moco" # contrastive learning 사용하는 표현 학습 경로를 선택
 # ssl_type: "byol"
 ssl_time_window: 4
 
-double_neg: True
+double_neg: True 
 
 noise_weight: 0.
 adaptation: False

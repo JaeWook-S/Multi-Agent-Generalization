@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<Desc>
+    <Frame type="Frame" name="GameUI/UIContainer/FullscreenUpperContainer" file="GameUI">
+        <Frame type="GameMessageDisplay" name="ChatDisplay">
+            <Width val="500"/>
+            <Height val="120"/>
+            <Anchor side="Top" relative="$parent" pos="Min" offset="140"/>
+            <Anchor side="Left" relative="$parent" pos="Min" offset="16"/>
+            <Anchor side="Bottom" relative="$parent" pos="Min" offset="260"/>
+            <Anchor side="Right" relative="$parent" pos="Min" offset="516"/>
+            <Style val="HiSSDCompactMessage"/>
+            <HideClippedMessages val="true"/>
+        </Frame>
+    </Frame>
+</Desc>

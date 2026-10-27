@@ -26,11 +26,11 @@ class HISSDAgent(nn.Module):
         self.skill_dim = args.skill_dim
 
         self.q = Qnet(args)
-        self.value = ValueNet(task2input_shape_info, task2decomposer, task2n_agents, decomposer, args)
+        self.value = ValueNet(task2input_shape_info, task2decomposer, task2n_agents, decomposer, args) # value net
         self.encoder = Encoder(args)
-        self.decoder = Decoder(task2input_shape_info, task2decomposer, task2n_agents, decomposer, args)
-        self.planner = PlannerModel(task2input_shape_info, task2decomposer, task2n_agents, decomposer, args)
-        self.discr = Discriminator(task2input_shape_info, task2decomposer, task2n_agents, decomposer, args)
+        self.decoder = Decoder(task2input_shape_info, task2decomposer, task2n_agents, decomposer, args) # action decoder
+        self.planner = PlannerModel(task2input_shape_info, task2decomposer, task2n_agents, decomposer, args) # common skills encoder
+        self.discr = Discriminator(task2input_shape_info, task2decomposer, task2n_agents, decomposer, args) # task-specific skills encoder
 
         self.last_out_h = None
         self.last_h_plan = None
@@ -94,14 +94,18 @@ class HISSDAgent(nn.Module):
         logits = self.discr.compute_logits(inputs, inputs_pos)
         return logits
 
+    """ 두 스킬을 계산해 action decoder로 전달 """
     def forward(self, inputs, hidden_state_plan, hidden_state_dec, hidden_state_dis, t, task, skill,
                 mask=False, actions=None, local_obs=None, test_mode=None):
         if t % self.c == 0:
-            out_h, h_plan, _ = self.forward_planner(inputs, hidden_state_plan, t, task)
-            out_h = self.forward_planner_feedforward(out_h)
+            # out_h : 공통 스킬 c에 대응하는 토큰 묶음 / h_plan : 다음 시점에 사용할 planner의 기억
+            out_h, h_plan, _ = self.forward_planner(inputs, hidden_state_plan, t, task) 
+            out_h = self.forward_planner_feedforward(out_h) # 공통 스킬을 action decoder용으로 변환한 표현
             self.last_out_h, self.last_h_plan = out_h, h_plan
+        # discr_h : 행동 실행에 사용할 과제별 스킬 z 
         _, discr_h, h_dis = self.forward_discriminator(inputs, t, task, hidden_state_dis)
         discr_h  = discr_h.reshape(-1, 1, self.args.entity_embed_dim)
+        # act : 행동 번호가 아닌 행동별 점수 / h_dec : 다음 시점에 사용할 decoder 기억
         act, h_dec, _ = self.decoder(self.last_out_h, inputs, discr_h, hidden_state_dec, task, mask, actions)
 
         return act, self.last_h_plan, h_dec, h_dis, skill
@@ -254,9 +258,9 @@ class ValueNet(nn.Module):
         ## enemy_obs ought to add attack_action_info
         obs_en_dim += 1
 
-        self.ally_value = nn.Linear(obs_al_dim, self.entity_embed_dim)
-        self.enemy_value = nn.Linear(obs_en_dim, self.entity_embed_dim)
-        self.own_value = nn.Linear(wrapped_obs_own_dim, self.entity_embed_dim)
+        self.ally_value = nn.Linear(obs_al_dim, self.entity_embed_dim) # 적별 토큰 생성
+        self.enemy_value = nn.Linear(obs_en_dim, self.entity_embed_dim) # 다른 아군별 토큰 생성
+        self.own_value = nn.Linear(wrapped_obs_own_dim, self.entity_embed_dim) # 자기 정보의 토큰 생성
 
         self.ln = nn.Sequential(nn.LayerNorm(self.entity_embed_dim), nn.Tanh())
         self.transformer = Transformer(self.entity_embed_dim, args.head, args.depth, self.entity_embed_dim)
@@ -264,7 +268,7 @@ class ValueNet(nn.Module):
         self.q_skill = nn.Linear(self.entity_embed_dim, self.skill_dim)
         self.reward_fc = nn.Sequential(nn.Linear(self.entity_embed_dim, 128),
                                        nn.ReLU(inplace=True),
-                                       nn.Linear(128, 1))
+                                       nn.Linear(128, 1)) # value 출력을 위한 MLP
 
     def init_hidden(self):
         # make hidden states on the same device as model
@@ -331,7 +335,8 @@ class ValueNet(nn.Module):
         reward = self.reward_fc(reward)
         return reward, h
 
-    def forward(self, inputs, hidden_state, task):
+    def forward(self, inputs, hidden_state, task): 
+        # inputs: local obs + prev action + ID
         total_hidden = self.encode(inputs, hidden_state, task)
         reward, h = self.predict(total_hidden)
         return reward, h
@@ -492,6 +497,7 @@ class Decoder(nn.Module):
         n_entity = n_enemy + n_ally + 1
 
         # random mask
+        # 관측 feature(적 or 아군)를 무작위로 0으로 만드는 학습용 옵션
         if mask and actions is not None:
             actions = actions.reshape(-1)
 
@@ -513,6 +519,7 @@ class Decoder(nn.Module):
         history_hidden = hidden_state
         own_emb_inputs, enemy_emb_inputs, ally_emb_inputs = emb_inputs
         emb_hidden = th.cat([own_emb_inputs, enemy_emb_inputs, ally_emb_inputs], dim=1)
+        # 여기선 아직 task-specific skills z는 안넣음
         total_hidden = th.cat([own_hidden, enemy_hidden, ally_hidden, emb_hidden, history_hidden], dim=1)
 
         outputs = self.transformer(total_hidden, None)
@@ -522,8 +529,10 @@ class Decoder(nn.Module):
         cls_out = self.cls_fc(th.zeros_like(h).detach())
         skill_hidden = discr_h.reshape(-1, 1, self.entity_embed_dim).repeat(1, outputs.shape[1], 1)
         outputs = th.cat([outputs, skill_hidden], dim=-1)
+        # 자기 토큰으로 기본 행동 6개의 점수를 계산
         base_action_inputs = outputs[:, 0, :]
         q_base = self.base_q_skill(base_action_inputs)
+        # 적별 토큰을 골라 공격 점수를 계산
         attack_action_inputs = outputs[:, 1: 1+n_enemy]
         q_attack = self.ally_q_skill(attack_action_inputs)
         q = th.cat([q_base, q_attack.reshape(-1, n_enemy)], dim=-1)
@@ -632,7 +641,8 @@ class PlannerModel(nn.Module):
             enemy_out = self.act_enemy_forward(enemy_emb)
             ally_out = self.act_ally_forward(ally_emb)
         elif forward_type == 'value':
-            own_out = self.value_own_forward(own_emb)
+            # common skill emb -> MLP -> value 계산용 토큰
+            own_out = self.value_own_forward(own_emb) 
             enemy_out = self.value_enemy_forward(enemy_emb)
             ally_out = self.value_ally_forward(ally_emb)
 
@@ -680,31 +690,34 @@ class PlannerModel(nn.Module):
         ally_feats.unsqueeze(1)
 
         # compute key, query and value for attention
+        # 자신, 적, 아군 특징 -> linear -> 64 dim token
         own_hidden = self.own_value(own_stack)
         ally_hidden = self.ally_value(ally_stack)
         enemy_hidden = self.enemy_value(enemy_stack)
         history_hidden = hidden_state.unsqueeze(1)
 
-        b = own_hidden.shape[0]
+        b = own_hidden.shape[0] # 게임 수 x 에이전트 수
+        # prev hidden state를 붙임
         total_hidden = th.cat([own_hidden, enemy_hidden, ally_hidden, history_hidden], dim=2)
         total_hidden = total_hidden.reshape(b, -1, self.entity_embed_dim)
 
         outputs = self.transformer(total_hidden, None).reshape(b, self.args.num_stack_frames, -1, self.entity_embed_dim)
-        h = outputs[:, -1, -1]
+        h = outputs[:, -1, -1] # [3, 64] / 다음 planner hidden state
         outputs = outputs[:, :, :-1]
 
         commit_loss = th.tensor(0.).to(inputs.device)
         if self.vq_skill:
             outputs, commit_loss = self.skill_module(outputs)
 
-        own_out_h = outputs[:, -1, 0].unsqueeze(1)
-        enemy_out_h = outputs[:, -1, 1:1+n_enemy]
-        ally_out_h = outputs[:, -1, 1+n_enemy:1+n_enemy+n_ally]
+        own_out_h = outputs[:, -1, 0].unsqueeze(1) # [3, 1, 64]
+        enemy_out_h = outputs[:, -1, 1:1+n_enemy] # [3, 3, 64] / 3 vs 3 기준
+        ally_out_h = outputs[:, -1, 1+n_enemy:1+n_enemy+n_ally] # [3, 2, 64]
 
         own_out, enemy_out, ally_out = own_out_h, enemy_out_h, ally_out_h
 
         out_loss = th.tensor(0.).to(inputs.device)
-        if loss_out and next_inputs is not None:
+        if loss_out and next_inputs is not None: # next_inputs : 학습 중 controller가 가져온 다음 global state
+            # 공통 스킬을 global state 예측으로 연결
             out_loss = self.rec_module([own_out, enemy_out, ally_out], next_inputs, task,
                                        t=t, actions=actions)
             out_loss += commit_loss
@@ -804,12 +817,13 @@ class Discriminator(nn.Module):
         history_hidden = hidden_state
 
         b = own_hidden.shape[0]
+        # 이전 hidden state를 transformer 입력에 넣지 않음
         total_hidden = th.cat([own_hidden, enemy_hidden, ally_hidden], dim=1)
         outputs = self.transformer(total_hidden, None)
         h = history_hidden
 
-        own_out_h = outputs[:, 0].reshape(-1, self.entity_embed_dim)
-        own_out = self.ssl_proj(own_out_h)
+        own_out_h = outputs[:, 0].reshape(-1, self.entity_embed_dim) # 대조학습 손실에 사용하는 표현
+        own_out = self.ssl_proj(own_out_h) # 행동 디코더에 사용하는 과제별 스킬 표현
         if self.ssl_type == 'moco':
             own_out_h = self.act_proj(own_out_h)
         elif self.ssl_type == 'byol':
@@ -950,6 +964,7 @@ class MergeRec(nn.Module):
         n_entities = n_agents + n_enemies
 
         # get decomposed state information
+        # ally_states : 내가 조종하는 팀 전체 -> ally_emb처럼 자신을 제외한 아군이 아님
         ally_states, enemy_states, last_action_states, timestep_number_state = task_decomposer.decompose_state(states)
         ally_states = th.stack(ally_states, dim=0)  # [n_agents, bs, 1, state_nf_al]
 
@@ -957,7 +972,8 @@ class MergeRec(nn.Module):
             F.one_hot(actions.reshape(-1), num_classes=self.task2last_action_shape[task]))
         current_compact_action_states = current_compact_action_states.reshape(bs, n_agents, -1).permute(1, 0, 2).unsqueeze(2)
         ally_states = th.cat([ally_states, current_compact_action_states], dim=-1)
-
+        
+        # 적 정답에는 그 적을 누군가 공격했는지를 붙임
         current_attack_action_info = current_attack_action_info.reshape(bs, n_agents, n_enemies).sum(dim=1)
         attack_action_states = (current_attack_action_info > 0).type(ally_states.dtype).reshape(
             bs, n_enemies, 1, 1).permute(1, 0, 2, 3)
@@ -989,11 +1005,12 @@ class MergeRec(nn.Module):
 
     def forward(self, emb_inputs, states, task, t=0, actions=None):
         own_emb, enemy_emb, ally_emb = emb_inputs
-        ally_states, enemy_states = self.global_process(states, task, actions=actions)
+        ally_states, enemy_states = self.global_process(states, task, actions=actions) # 예측해야 할 미래 상태
         bs, n_agents, n_enemies = ally_states.shape[0], ally_states.shape[1], enemy_states.shape[1]
         if t==0:
             self.last_enemy_h = self.enemy_hidden.repeat(bs, n_enemies, 1).unsqueeze(-2)
 
+        # 여러 에이전트의 표현을 다시 모음
         own_emb = own_emb.reshape(bs, n_agents, self.entity_embed_dim)
         enemy_emb = enemy_emb.reshape(bs, n_agents, n_enemies, self.entity_embed_dim).permute(
             0, 2, 1, 3).reshape(-1, n_agents, self.entity_embed_dim)
@@ -1003,14 +1020,16 @@ class MergeRec(nn.Module):
         own_q, own_k = self.own_qk(own_emb).chunk(2, -1)
         enemy_q, enemy_k = self.enemy_qk(enemy_emb).chunk(2, -1)
 
+        # 적 표현도 같은 적에 대한 여러 에이전트의 표현을 모아 attention으로 통합
+        # 이후 아군,적 표현을 함께 처리해서 다음 상태 특징을 예측
         enemy_ref = self.attn_process(enemy_emb, enemy_q, enemy_k)[:, 0].reshape(
-            bs, n_enemies, self.entity_embed_dim)
+            bs, n_enemies, self.entity_embed_dim) # 같은 적에 대해 여러 에이전트가 만든 표현
         enemy_q, enemy_k = self.enemy_ref_qk(enemy_ref).chunk(2, -1)
 
         total_emb = th.cat([own_emb, enemy_ref], dim=-2)
         total_q = th.cat([own_q, enemy_q], dim=-2)
         total_k = th.cat([own_k, enemy_k], dim=-2)
-        total_out = self.attn_process(total_emb, total_q, total_k)
+        total_out = self.attn_process(total_emb, total_q, total_k) # 아군과 적 전체의 표현
 
         ally_out = total_out[:, :n_agents]
         enemy_out = total_out[:, -n_enemies:]
@@ -1020,6 +1039,7 @@ class MergeRec(nn.Module):
         ally_out = self.ally_dec_fc(ally_out).reshape(-1, al_dim)
         enemy_out = self.enemy_dec_fc(enemy_out).reshape(-1, en_dim)
 
+        # 예측값과 정답 비교
         loss = F.mse_loss(ally_out, ally_states.reshape(-1, al_dim).detach()) + \
             F.mse_loss(enemy_out, enemy_states.reshape(-1, en_dim).detach())
         return loss

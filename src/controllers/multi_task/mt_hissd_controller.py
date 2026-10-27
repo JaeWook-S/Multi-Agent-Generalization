@@ -8,7 +8,19 @@ import torch.distributions as D
 import numpy as np
 import torch.nn.functional as F
 
-
+""" 
+    mac이 해당 클래스의 객체
+    게임 배치에서 신경망 입력을 만들고, 신경망 출력으로 행동을 선택하도록 연결 
+                runner가 전달한 배치
+                ↓
+                _build_inputs(): 현재 에이전트별 입력 구성
+                ↓
+                self.agent(...): 신경망으로 행동별 점수 계산
+                ↓
+                action_selector: 가능한 행동 중 선택
+                ↓
+                runner에 행동 반환
+"""
 # This multi-agent controller shares parameters between agents
 class HISSDSMAC:
     def __init__(self, train_tasks, task2scheme, task2args, main_args):
@@ -37,6 +49,7 @@ class HISSDSMAC:
                 task_decomposer = decomposer_REGISTRY[env2decomposer[task_args.env]](
                     task_args
                 )
+                # decomposer : 긴 관측 벡터를 자기 정보, 적 정보, 아군 정보로 나누는 도구
                 self.task2decomposer[task] = task_decomposer
                 if not self.surrogate_decomposer:
                     self.surrogate_decomposer = task_decomposer
@@ -74,7 +87,7 @@ class HISSDSMAC:
         chosen_actions = self.action_selector.select_action(
             agent_outputs[bs], avail_actions[bs], t_env, test_mode=test_mode
         )
-        return chosen_actions
+        return chosen_actions # [B, N]
 
     def forward_global_hidden(self, ep_batch, t, task, actions=None, test_mode=False):
         agent_inputs = ep_batch["state"][:, t]
@@ -280,6 +293,8 @@ class HISSDSMAC:
             hidden_states_plan,
             hidden_states_dis,
         ) = self.agent.init_hidden()
+
+        # [게임 배치 수, 에이전트 수, hidden 차원]
         self.hidden_states_value = hidden_states_value.unsqueeze(0).expand(
             batch_size, n_agents, -1
         )
@@ -330,6 +345,11 @@ class HISSDSMAC:
         actions = th.where(actions >= 0, actions, zeros)
         return actions
 
+    """ 
+        에이전트 i의 입력 = i의 현재 local observation
+                        + i의 이전 행동
+                        + i의 ID
+    """
     def _build_inputs(self, batch, t, task):
         # Assumes homogenous agents with flat observations.
         # Other MACs might want to e.g. delegate building inputs to each agent

@@ -64,5 +64,24 @@ python src/main.py --mto --config=hissd --env-config=sc2_offline --task-config=m
 
 All results will be stored in the `results` folder. You can see the console output, config, and tensorboard logging in the cooresponding directory.
 
+## Rollout and save replays
+
+```bash
+mkdir -p output/replay
+python src/main.py --mto --config=hissd --env-config=sc2_offline \
+  --task-config=marine-hard-expert --seed=1 \
+  --checkpoint_path="/path/to/run/models" --load_step=0 \
+  --evaluate=True --save_replay=True --test_nepisode=2 \
+  --env_args="{'replay_dir': '$PWD/output/replay'}"
+```
+
+### Watch replays on Mac
+
+To avoid the SC2 4.10 initialization crash on the tested Mac, place replays in `output/replay/` and run:
+
+```bash
+./output/replay/Play_SC2_Replay.command
+```
+
 ## Build upon ODIS
 Our HiSSD is built upon ODIS, please refer to [https://github.com/LAMDA-RL/ODIS](https://github.com/LAMDA-RL/ODIS).
