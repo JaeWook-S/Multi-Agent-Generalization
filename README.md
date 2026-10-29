@@ -2,6 +2,10 @@
 
 Ongoing research on multi-agent generalization based on [HiSSD](https://github.com/mooricAnna/HiSSD).
 
+[Experiment results](Experiment_Results.md)
+
+[Performance analysis](experiment_analysis/README.md)
+
 ## Installation instructions
 
 ### Install StarCraft II

@@ -1,4 +1,4 @@
-[sc2-icu-compat] new=0x102c097d0/0x113956790 new_array=0x102c09800/0x1139568b0 delete=0x102c09830/0x1139568d0 delete_array=0x102c09850/0x1139569c0 regex=0x7ff8107bead2/0x113956b20
+[sc2-icu-compat] new=0x102c097d0/0x113956790 new_array=0x102c09800/0x1139568b0 delete=0x102c09830/0x1139568d0 delete_array=0x102c09850/0x1139569c0 regex=0x7ff81c402ad2/0x113956b20
 [sc2-icu-compat] v2 ICU-only allocation bridge loaded
 [sc2-icu-compat] updated 4 allocator import pointers
 [sc2-icu-compat] ICU image bindings updated

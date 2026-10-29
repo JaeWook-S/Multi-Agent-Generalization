@@ -1,0 +1,42 @@
+{
+  "replay": "/Users/jaewook/Desktop/SGVR 인턴/MA-Generalization/HiSSD/output/replay/stalker-zealot-expert/30000_replays/4s4z_2026-10-29-04-58-01.SC2Replay",
+  "metadata": {
+    "Title": "Just Another StarCraft II Map",
+    "MapName": "SMAC_Maps/4s4z.SC2Map",
+    "GameVersion": "4.10.0.75689",
+    "DataBuild": "75689",
+    "DataVersion": "B89B5D6FA7CBF6452E721311BFBC6CB2",
+    "BaseBuild": "Base75689",
+    "Duration": 93,
+    "Players": [
+      {
+        "PlayerID": 1,
+        "APM": 2550.0,
+        "Result": "Undecided",
+        "SelectedRace": "Terr",
+        "AssignedRace": "Terr"
+      }
+    ]
+  },
+  "observations": 685,
+  "player_version": "2.4-health-bars",
+  "runtime_log": "/Users/jaewook/Desktop/SGVR 인턴/MA-Generalization/HiSSD/output/replay/diagnostics/mac410_compat/runs/20261029-205257-209509/sc2.log",
+  "render_data_requested": false,
+  "requested_start_loop": 0,
+  "isolated_game_session": true,
+  "compact_messages": true,
+  "unit_status_bars": "All",
+  "pid": 26294,
+  "last_request": "quit",
+  "engine_version": "4.10.0.75689",
+  "last_game_loop": 684,
+  "last_unit_count": 2,
+  "first_playback_loop": 0,
+  "interrupt_count": 4,
+  "interrupted": true,
+  "interrupted_request": "step",
+  "quit_requested": true,
+  "process_exit": 0,
+  "graceful_exit": true,
+  "playback_seconds": 34.91
+}
