@@ -1,2 +1,10 @@
 *.SC2Replay
 output/pdf/
+
+# Generated replay player logs and diagnostics
+output/replay/diagnostics/mac410_compat/runs/
+output/replay/diagnostics/mac410_compat/player_runtime.log
+output/replay/diagnostics/mac410_compat/last_playback_result.json
+output/replay/diagnostics/mac410_compat/validation_*
+output/replay/diagnostics/mac410_compat/replay_*_validation.png
+output/replay/diagnostics/mac410_compat/__pycache__/
