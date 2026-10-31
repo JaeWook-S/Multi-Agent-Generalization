@@ -4,7 +4,7 @@ Ongoing research on multi-agent generalization based on [HiSSD](https://github.c
 
 [Experiment results](Experiment_Results.md)
 
-[Performance analysis](experiment_analysis/README.md)
+[Experiment analysis](experiment_analysis/README.md)
 
 ## Installation instructions
 

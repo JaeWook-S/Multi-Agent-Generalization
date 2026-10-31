@@ -11,9 +11,9 @@ from types import ModuleType, SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from experiment_analysis.evaluate_performance import (
-    checkpoint_hash, collect_episode, load_config, resolve_checkpoint, run, save_reports)
-from experiment_analysis.metrics import episode_record, summarize, wilson_interval
+from experiment_analysis.stage1_map_selection.evaluate_performance import (
+    checkpoint_hash, collect_episode, load_config, map_seed, resolve_checkpoint, run, save_reports)
+from experiment_analysis.stage1_map_selection.metrics import episode_record, summarize, wilson_interval
 
 
 def record(won=False, timeout=False, dead_enemies=2, length=5):
@@ -76,6 +76,15 @@ class MetricsTests(unittest.TestCase):
 
 
 class IntegrationTests(unittest.TestCase):
+    def test_map_seed_uses_full_test_tasks_index(self):
+        tasks = ["1s3z", "1s4z", "1s5z", "2s3z", "2s4z", "2s5z", "3s3z",
+                 "3s4z", "3s5z", "4s3z", "4s4z", "4s5z", "4s6z"]
+        self.assertEqual(map_seed(1, "2s5z", tasks), 6)
+        self.assertEqual(map_seed(1, "4s5z", tasks), 12)
+        self.assertEqual([map_seed(1, task, tasks) for task in ["3s3z", "2s5z"]], [7, 6])
+        with self.assertRaises(ValueError):
+            map_seed(1, "unknown", tasks)
+
     def test_runner_adapter_uses_test_mode_and_keeps_terminal_info(self):
         env = SimpleNamespace(timeouts=0, force_restarts=0, n_agents=3, n_enemies=3)
         runner = SimpleNamespace(env=env, task="3m", episode_limit=10,

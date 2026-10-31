@@ -14,9 +14,9 @@ import subprocess
 import sys
 from types import SimpleNamespace
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
-from experiment_analysis.metrics import episode_record, markdown_report, summarize
+from experiment_analysis.stage1_map_selection.metrics import episode_record, markdown_report, summarize
 
 
 def parse_args():
@@ -149,7 +149,12 @@ def seed_policy(seed, torch, numpy):
         torch.cuda.manual_seed_all(seed)
 
 
-def run(args):
+def map_seed(base_seed, task, test_tasks):
+    """평가할 맵의 부분집합·순서와 무관하게 전체 시험 맵 목록의 인덱스로 seed를 정한다."""
+    return base_seed + list(test_tasks).index(task)
+
+
+def run(args, diagnostic_observer=None):
     """모델 하나를 고정하고 평가한다. learner/optimizer 생성과 offline dataset 로딩은 하지 않는다."""
     checkpoint = resolve_checkpoint(args.checkpoint_path, args.load_step)
     config, config_source = load_config(checkpoint, args.task_config, args.training_config)
@@ -163,7 +168,7 @@ def run(args):
         raise FileNotFoundError(f"SC2 설치 경로가 없습니다. --sc2-path로 지정하세요: {sc2_path}")
     # 상대 SC2PATH로 인한 AppErrors.txt/언어 데이터 초기화 실패를 피한다.
     os.environ["SC2PATH"] = str(sc2_path)
-    output_dir = (args.output_dir or REPO_ROOT / "experiment_analysis/results" / args.task_config /
+    output_dir = (args.output_dir or REPO_ROOT / "experiment_analysis/stage1_map_selection/results" / args.task_config /
                   f"{checkpoint.name}_{datetime.now():%Y%m%d-%H%M%S-%f}").expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=False)
     logger = logging.getLogger("performance_analysis")
@@ -230,9 +235,14 @@ def run(args):
         mac.agent.eval()
         for task in maps:
             runners[task].setup(scheme=schemes[task], groups=groups[task], preprocess=preprocess[task], mac=mac)
+            # 2단계에서만 읽기용 기록 환경을 덧씌운다. 원래 runner/MAC 호출 순서는 유지한다.
+            if diagnostic_observer is not None:
+                runners[task].env = diagnostic_observer.wrap_env(task, runners[task].env)
         del buffers
-        map_seeds = {task: args.seed + config["test_tasks"].index(task) for task in maps}
+        map_seeds = {task: map_seed(args.seed, task, config["test_tasks"]) for task in maps}
         metadata.update({"status": "running", "map_seeds": map_seeds})
+        if diagnostic_observer is not None:
+            metadata.update(diagnostic_observer.on_start(output_dir, config, metadata))
         write_json(output_dir / "run_metadata.json", metadata)
         logger.info("Checkpoint: %s | device: %s | %d maps x %d episodes", checkpoint, device, len(maps), args.episodes)
         logger.info("Results: %s", output_dir)
@@ -250,6 +260,9 @@ def run(args):
                     logger.info("[%s] split=%s | env_seed=%d", task, split, env_seed)
                     for episode in range(1, args.episodes + 1):
                         record = collect_episode(runner, episode, env_seed, split)
+                        # 원본 관측/행동의 일관성 검사를 통과하고 저장한 판만 완료 목록에 넣는다.
+                        if diagnostic_observer is not None:
+                            diagnostic_observer.episode_finished(runner, record)
                         if writer is None:
                             writer = csv.DictWriter(stream, fieldnames=list(record))
                             writer.writeheader()
@@ -278,6 +291,8 @@ def run(args):
                 logger.exception("[%s] 환경 종료 실패", task)
         metadata.update({"status": status, "completed_episodes": len(records), "error": error,
                          "finished_at": datetime.now().astimezone().isoformat()})
+        if diagnostic_observer is not None:
+            metadata.update(diagnostic_observer.final_metadata())
         write_json(output_dir / "run_metadata.json", metadata)
         save_reports(output_dir, records, maps, config["train_tasks"], args.episodes, checkpoint, status)
         logger.info("Status: %s | completed episodes: %d | %s", status, len(records), output_dir / "summary.md")
@@ -287,8 +302,13 @@ def run(args):
     return 0 if status == "complete" else 130 if status == "interrupted" else 1
 
 
-if __name__ == "__main__":
+def main():
+    """기존 명령과 단계별 명령에서 같은 인자 검사·종료 코드를 사용한다."""
     try:
         sys.exit(run(parse_args()))
     except (ValueError, FileNotFoundError) as exc:
         sys.exit(str(exc))
+
+
+if __name__ == "__main__":
+    main()

@@ -1,2 +1,4 @@
 results/
+# 이전 결과 경로도 Git에서 제외한다.
+/results
 __pycache__/
