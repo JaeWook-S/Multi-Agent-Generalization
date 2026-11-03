@@ -89,6 +89,37 @@ python experiment_analysis/stage2_behavior_diagnostics/analyze_diagnostics.py \
 
 각각 `analysis/window_3/`, `analysis/window_10/`에 생성되며 원본을 바꾸지 않습니다. `--bootstrap-samples`와 `--bootstrap-seed`는 분석 전용이고 게임 seed와 별개입니다. 1단계 성과 CSV만으로는 이 분석을 할 수 없습니다.
 
+## NPZ 원본을 2D로 보기
+
+SC2나 재추론 없이 기록된 좌표·체력·행동을 브라우저에서 볼 수 있습니다. NumPy만 필요합니다.
+
+```bash
+python experiment_analysis/stage2_behavior_diagnostics/view_npz_cases.py \
+  --run-dir experiment_analysis/stage2_behavior_diagnostics/results/3s5z/30000_20261101-192931-001034 \
+  --episodes 1 21 44 81 89 94
+```
+
+생성된 실행 폴더의 `analysis/npz-case-viewer.html`을 브라우저에서 엽니다. `.html` 파일 하나만 옮겨도 볼 수 있습니다.
+
+- 에피소드 1의 아군 A0, 스텝 19에서 시작합니다. ID·스텝은 0부터 시작합니다.
+- 스텝 t는 행동 직전 상태이며, t의 행동 결과는 t+1에서 확인합니다.
+- `관심 행동으로 이동`으로 저체력·저실드·쿨다운 0인 Stalker의 비공격 선택 시점을 찾습니다.
+- 선택한 적은 스텝을 넘겨도 바뀌지 않습니다. 양쪽이 살아 있을 때 같은 적까지의 거리를 비교합니다.
+- 이동 전·직후·5스텝 뒤의 체력과 생존을 표시합니다. 5스텝 전에 종료되면 실제 관측 구간을 표시합니다.
+- SC2 그래픽·지형·공격 애니메이션을 재현하는 영상은 아닙니다. 후속 경과에는 원래 정책의 추가 행동도 포함되므로 한 행동의 인과 효과로 해석하지 않습니다.
+
+노트북에서 생성하고 브라우저로 열 수도 있습니다. 저장소 경로를 찾은 `ROOT` 변수를 사용합니다.
+
+```python
+import sys
+import webbrowser
+sys.path.insert(0, str(ROOT))
+from experiment_analysis.stage2_behavior_diagnostics.view_npz_cases import build_viewer
+
+viewer = build_viewer(ROOT / "experiment_analysis/stage2_behavior_diagnostics/results/3s5z/30000_20261101-192931-001034")
+webbrowser.open(viewer.as_uri())
+```
+
 ## 중단과 검증
 
 정상 완료한 판만 성과 CSV와 원본 궤적에 등록합니다. 연결 오류·강제 재시작·누락된 관측은 패배로 세지 않고 중단합니다. 앞서 완료한 판은 보존하고 중단 상태를 표시합니다. 기존 수집 폴더와 원본 파일은 덮어쓰지 않습니다.

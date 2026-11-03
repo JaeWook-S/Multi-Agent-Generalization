@@ -1,0 +1,141 @@
+<div id="hissd-npz-cases">
+  <style>
+    #hissd-npz-cases { color:var(--foreground); font-family:inherit; }
+    #hissd-npz-cases .npz-space { margin-block:12px; }
+    #hissd-npz-cases .npz-arena { width:100%; display:block; }
+    #hissd-npz-cases .npz-legend { display:flex; gap:16px; flex-wrap:wrap; }
+    #hissd-npz-cases .npz-ally { color:var(--viz-series-1); }
+    #hissd-npz-cases .npz-enemy { color:var(--viz-series-2); }
+    #hissd-npz-cases .npz-status { min-height:1.5em; }
+  </style>
+  <h2>원본 좌표·체력으로 보는 전투</h2>
+  <div class="viz-controls npz-space">
+    <label class="form-label">에피소드 <select class="form-select" data-role="episode"></select></label>
+    <label class="form-label">관찰할 아군 <select class="form-select" data-role="unit"></select></label>
+    <label class="form-label">거리를 비교할 적 · 고정 <select class="form-select" data-role="enemy"></select></label>
+  </div>
+  <div class="viz-controls npz-space">
+    <button class="btn" type="button" data-role="prev">한 스텝 전</button>
+    <button class="btn btn-primary" type="button" data-role="play">재생</button>
+    <button class="btn" type="button" data-role="next">한 스텝 뒤</button>
+    <label class="form-label">관심 행동으로 이동 <select class="form-select" data-role="event"></select></label>
+  </div>
+  <label class="form-label">원본 스텝 <output class="tabular-nums" data-role="counter"></output>
+    <input class="form-range" data-role="step" type="range" min="0" value="0" step="1" aria-label="원본 로그 스텝">
+  </label>
+  <p class="npz-status tabular-nums" data-role="status" aria-live="polite"></p>
+  <div class="npz-legend text-small"><span class="npz-ally">● A: 아군</span><span class="npz-enemy">● E: 적군</span><span>S: Stalker · Z: Zealot · 굵은 원: 관찰 대상</span></div>
+  <svg class="npz-arena" data-role="arena" role="img" aria-label="기록된 아군·적군 위치와 이동 경로"></svg>
+  <div class="table-responsive">
+    <table class="table table-sm tabular-nums">
+      <thead><tr><th>관찰 시점</th><th>체력</th><th>실드</th><th data-role="distance-title">고정된 적까지 거리</th><th>생존</th></tr></thead>
+      <tbody data-role="details"></tbody>
+    </table>
+  </div>
+  <p class="text-small">화살표는 선택한 아군의 실제 다음 스텝 변위다. 거리는 양쪽 유닛이 살아 있을 때만 표시한다. 후속 5스텝에는 원래 정책의 추가 행동도 포함된다.</p>
+  <p class="text-small" data-role="provenance"></p>
+  <script type="application/json" data-role="data">__CASE_DATA__</script>
+  <script>
+  (() => {
+    const root=document.getElementById('hissd-npz-cases');
+    const data=JSON.parse(root.querySelector('[data-role="data"]').textContent);
+    const el=Object.fromEntries(['episode','unit','enemy','event','prev','play','next','step','counter','status','arena','details','distance-title','provenance'].map(k=>[k,root.querySelector(`[data-role="${k}"]`)]));
+    const ns='http://www.w3.org/2000/svg';
+    let index=0,unit=0,enemy=0,step=0,timer=null;
+    const current=()=>data.episodes[index];
+    const short=t=>t==='Stalker'?'S':t==='Zealot'?'Z':t;
+    const actionName=a=>a===0?'noop':a===1?'정지':a>=2&&a<=5?`이동 · 행동 ${a}`:`공격 · E${a-current().attackOffset}`;
+    const option=(value,text)=>{const o=document.createElement('option');o.value=value;o.textContent=text;return o;};
+    const svg=(tag,attrs={},text)=>{const n=document.createElementNS(ns,tag);Object.entries(attrs).forEach(([k,v])=>n.setAttribute(k,v));if(text!==undefined)n.textContent=text;return n;};
+    function pause(){if(timer!==null)clearInterval(timer);timer=null;el.play.textContent='재생';}
+    function remember(){const s={map:data.map,episode:current().episode,unit,enemy,step};if(window.openai?.setWidgetState)window.openai.setWidgetState({modelContent:s,privateContent:null}).catch(()=>{});}
+    function closest(at,u){let best=Infinity,id=-1;const ep=current();for(let j=0;j<ep.enemies.types.length;j++){if(ep.enemies.health[at][j]<=0)continue;const d=Math.hypot(ep.allies.x[at][u]-ep.enemies.x[at][j],ep.allies.y[at][u]-ep.enemies.y[at][j]);if(d<best){best=d;id=j;}}return id;}
+    function distance(at){const ep=current();if(enemy<0||ep.allies.health[at][unit]<=0||ep.enemies.health[at][enemy]<=0)return 'N/A';return Math.hypot(ep.allies.x[at][unit]-ep.enemies.x[at][enemy],ep.allies.y[at][unit]-ep.enemies.y[at][enemy]).toFixed(2);}
+    function setStep(value,save=true){step=Math.max(0,Math.min(current().steps,Number(value)));el.step.value=step;render();if(save)remember();}
+    function loadEpisode(i){
+      pause();index=i;const ep=current(),first=ep.events[0];unit=first?first.unit:0;step=first?first.step:0;
+      el.unit.replaceChildren(...ep.allies.types.map((t,j)=>option(j,`A${j} · ${t}`)));
+      el.enemy.replaceChildren(option(-1,'선택 없음'),...ep.enemies.types.map((t,j)=>option(j,`E${j} · ${t}`)));
+      el.event.replaceChildren(option(-1,'스텝을 직접 선택'),...ep.events.map((e,j)=>option(j,`A${e.unit} · 스텝 ${e.step} · ${actionName(e.action)}`)));
+      el.unit.value=unit;enemy=closest(step,unit);el.enemy.value=enemy;el.event.value=first?0:-1;
+      el.step.max=ep.steps;el.step.value=step;render();
+    }
+    function render(){
+      const ep=current(),alive=ep.allies.health[step][unit]>0,action=step<ep.steps?ep.actions[step][unit]:null;
+      el.counter.textContent=`${step} / ${ep.steps}`;
+      const phase=ep.firstDeath===null?'아군 사망 없음':step<ep.firstDeath?'첫 아군 사망 전':'첫 아군 사망 이후';
+      const moved=step<ep.steps&&alive&&ep.allies.health[step+1][unit]>0?Math.hypot(ep.allies.x[step+1][unit]-ep.allies.x[step][unit],ep.allies.y[step+1][unit]-ep.allies.y[step][unit]).toFixed(3):'N/A';
+      el.status.textContent=`A${unit} ${ep.allies.types[unit]} · ${action===null?'종료 상태':`${step} → ${step+1}: ${actionName(action)}`} · 실제 이동 ${moved} · 쿨다운 ${ep.allies.cooldown[step][unit].toFixed(1)} · ${phase}`;
+      el.prev.disabled=step===0;el.next.disabled=step===ep.steps;
+      el['distance-title'].textContent=enemy<0?'적까지 거리':`고정된 E${enemy}까지 거리`;
+      el.details.replaceChildren();
+      const rows=[[step,'행동 전'],...(step<ep.steps?[[step+1,'행동 직후']]:[])];
+      if(step<ep.steps)rows.push([Math.min(step+5,ep.steps),step+5<=ep.steps?'5스텝 뒤':`${ep.steps-step}스텝 뒤 · 에피소드 종료`]);
+      rows.forEach(([t,label])=>{const tr=document.createElement('tr');[`${t} · ${label}`,`${ep.allies.health[t][unit].toFixed(1)} / ${ep.allies.maxHealth[unit]}`,`${ep.allies.shield[t][unit].toFixed(1)} / ${ep.allies.maxShield[unit]}`,distance(t),ep.allies.health[t][unit]>0?'생존':'사망'].forEach(v=>{const td=document.createElement('td');td.textContent=v;tr.append(td);});el.details.append(tr);});
+      el.provenance.textContent=`${ep.map} · episode ${ep.episode} · ${ep.outcome} · 환경 seed ${ep.seed} · 1스텝=${ep.stepMul} game loop · ${ep.source}`;
+      const width=Math.max(280,el.arena.getBoundingClientRect().width||700),height=Math.max(285,Math.min(440,width*.56));
+      el.arena.setAttribute('viewBox',`0 0 ${width} ${height}`);el.arena.setAttribute('height',height);el.arena.replaceChildren();
+      const margins={left:43,right:25,top:20,bottom:35};
+      let xmin=Infinity,xmax=-Infinity,ymin=Infinity,ymax=-Infinity;
+      for(const side of [ep.allies,ep.enemies])for(let t=0;t<=ep.steps;t++)for(let j=0;j<side.types.length;j++)if(side.health[t][j]>0){xmin=Math.min(xmin,side.x[t][j]);xmax=Math.max(xmax,side.x[t][j]);ymin=Math.min(ymin,side.y[t][j]);ymax=Math.max(ymax,side.y[t][j]);}
+      xmin-=2;xmax+=2;ymin-=2;ymax+=2;
+      const scale=Math.min((width-margins.left-margins.right)/(xmax-xmin),(height-margins.top-margins.bottom)/(ymax-ymin));
+      const left=margins.left+((width-margins.left-margins.right)-(xmax-xmin)*scale)/2;
+      const top=margins.top+((height-margins.top-margins.bottom)-(ymax-ymin)*scale)/2;
+      const X=x=>left+(x-xmin)*scale,Y=y=>top+(ymax-y)*scale;
+      const fg='var(--foreground)',border='var(--border)',own='var(--viz-series-1)',foe='var(--viz-series-2)';
+      const add=(tag,attrs,text)=>el.arena.append(svg(tag,attrs,text));
+      for(let v=Math.ceil(xmin/5)*5;v<=xmax;v+=5){add('line',{x1:X(v),y1:Y(ymin),x2:X(v),y2:Y(ymax),stroke:border});add('text',{x:X(v),y:Y(ymin)+17,fill:fg,'text-anchor':'middle','font-size':12},v);}
+      for(let v=Math.ceil(ymin/5)*5;v<=ymax;v+=5){add('line',{x1:X(xmin),y1:Y(v),x2:X(xmax),y2:Y(v),stroke:border});add('text',{x:X(xmin)-7,y:Y(v)+4,fill:fg,'text-anchor':'end','font-size':12},v);}
+      add('rect',{x:X(xmin),y:Y(ymax),width:(xmax-xmin)*scale,height:(ymax-ymin)*scale,fill:'none',stroke:border});
+      add('text',{x:(X(xmin)+X(xmax))/2,y:height-4,fill:fg,'text-anchor':'middle','font-size':12},'SC2 x 좌표');
+      add('text',{x:12,y:height/2,fill:fg,'text-anchor':'middle','font-size':12,transform:`rotate(-90 12 ${height/2})`},'SC2 y 좌표');
+      const tail=[];for(let t=Math.max(0,step-6);t<=step;t++)if(ep.allies.health[t][unit]>0)tail.push(`${X(ep.allies.x[t][unit])},${Y(ep.allies.y[t][unit])}`);
+      if(tail.length>1)add('polyline',{points:tail.join(' '),fill:'none',stroke:own,'stroke-width':2,opacity:.6});
+      const labelBoxes=[],markerBoxes=[];
+      for(const side of [ep.allies,ep.enemies])for(let j=0;j<side.types.length;j++)if(side.health[step][j]>0){const x=X(side.x[step][j]),y=Y(side.y[step][j]);markerBoxes.push({l:x-12,r:x+12,t:y-10,b:y+18});}
+      const labelPosition=(x,y,text)=>{
+        const w=text.length*7+4,h=15;
+        const offsets=[[0,-19],[0,31],[-25,-13],[25,-13],[-30,25],[30,25],[0,-34],[0,46]];
+        let best=null,bestScore=Infinity;
+        offsets.forEach(([dx,dy],rank)=>{
+          const cx=Math.max(X(xmin)+w/2,Math.min(X(xmax)-w/2,x+dx));
+          const cy=Math.max(Y(ymax)+h,Math.min(Y(ymin)-4,y+dy));
+          const box={l:cx-w/2,r:cx+w/2,t:cy-h,b:cy+2};
+          let score=rank;
+          for(const old of labelBoxes)score+=Math.max(0,Math.min(box.r,old.r)-Math.max(box.l,old.l))*Math.max(0,Math.min(box.b,old.b)-Math.max(box.t,old.t))*10;
+          for(const mark of markerBoxes)score+=Math.max(0,Math.min(box.r,mark.r)-Math.max(box.l,mark.l))*Math.max(0,Math.min(box.b,mark.b)-Math.max(box.t,mark.t))*20;
+          if(score<bestScore){bestScore=score;best={cx,cy,box};}
+        });
+        labelBoxes.push(best.box);return best;
+      };
+      for(const [side,prefix,color] of [[ep.enemies,'E',foe],[ep.allies,'A',own]])for(let j=0;j<side.types.length;j++){
+        if(side.health[step][j]<=0)continue;const x=X(side.x[step][j]),y=Y(side.y[step][j]);
+        add('circle',{cx:x,cy:y,r:6.5,fill:color});
+        if((prefix==='A'&&j===unit)||(prefix==='E'&&j===enemy))add('circle',{cx:x,cy:y,r:10,fill:'none',stroke:fg,'stroke-width':prefix==='A'?2:1});
+        const label=width<450?`${prefix}${j}`:`${prefix}${j} ${short(side.types[j])}`;
+        const pos=labelPosition(x,y,label);
+        if(Math.abs(pos.cx-x)>5||pos.cy>y||pos.cy<y-24)add('line',{x1:x,y1:y,x2:pos.cx,y2:pos.cy-6,stroke:border});
+        add('text',{x:pos.cx,y:pos.cy,fill:fg,'text-anchor':'middle','font-size':12},label);
+        const hp=Math.max(0,side.health[step][j]/(side.maxHealth[j]||1));const shield=Math.max(0,side.shield[step][j]/(side.maxShield[j]||1));
+        add('rect',{x:x-11,y:y+10,width:22,height:3,fill:border});add('rect',{x:x-11,y:y+10,width:22*hp,height:3,fill:'var(--green)'});
+        add('rect',{x:x-11,y:y+14,width:22,height:3,fill:border});add('rect',{x:x-11,y:y+14,width:22*shield,height:3,fill:'var(--blue)'});
+      }
+      if(alive&&step<ep.steps&&ep.allies.health[step+1][unit]>0){const x=X(ep.allies.x[step][unit]),y=Y(ep.allies.y[step][unit]),tx=X(ep.allies.x[step+1][unit]),ty=Y(ep.allies.y[step+1][unit]),dx=tx-x,dy=ty-y,len=Math.hypot(dx,dy);if(len>.5){const ux=dx/len,uy=dy/len;add('line',{x1:x,y1:y,x2:tx,y2:ty,stroke:fg,'stroke-width':2});add('path',{d:`M${tx},${ty} L${tx-ux*6+uy*3},${ty-uy*6-ux*3} L${tx-ux*6-uy*3},${ty-uy*6+ux*3} Z`,fill:fg});}}
+    }
+    data.episodes.forEach((ep,i)=>el.episode.append(option(i,`${ep.map} · 에피소드 ${ep.episode}`)));
+    el.episode.addEventListener('change',()=>{loadEpisode(Number(el.episode.value));remember();});
+    el.unit.addEventListener('change',()=>{unit=Number(el.unit.value);render();remember();});
+    el.enemy.addEventListener('change',()=>{enemy=Number(el.enemy.value);render();remember();});
+    el.event.addEventListener('change',()=>{pause();const event=current().events[Number(el.event.value)];if(event){unit=event.unit;el.unit.value=unit;enemy=closest(event.step,unit);el.enemy.value=enemy;setStep(event.step);}});
+    el.step.addEventListener('input',()=>{pause();el.event.value=-1;setStep(el.step.value);});
+    el.prev.addEventListener('click',()=>{pause();el.event.value=-1;setStep(step-1);});
+    el.next.addEventListener('click',()=>{pause();el.event.value=-1;setStep(step+1);});
+    el.play.addEventListener('click',()=>{if(timer!==null){pause();remember();return;}if(step===current().steps)setStep(0);el.play.textContent='일시정지';timer=setInterval(()=>{if(step>=current().steps){pause();remember();return;}el.event.value=-1;setStep(step+1,false);},250);});
+    const restore=s=>{if(!s||s.map!==data.map)return;const i=data.episodes.findIndex(e=>e.episode===s.episode);if(i<0)return;loadEpisode(i);el.episode.value=i;unit=Math.max(0,Math.min(current().allies.types.length-1,Number(s.unit)||0));enemy=Math.max(-1,Math.min(current().enemies.types.length-1,Number(s.enemy)||0));el.unit.value=unit;el.enemy.value=enemy;setStep(Number(s.step)||0,false);};
+    loadEpisode(0);restore(window.openai?.widgetState?.modelContent);
+    window.addEventListener('openai:set_globals',e=>restore(e.detail?.globals?.widgetState?.modelContent));
+    new ResizeObserver(()=>render()).observe(el.arena);
+  })();
+  </script>
+</div>

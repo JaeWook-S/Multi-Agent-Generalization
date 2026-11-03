@@ -4,8 +4,9 @@
 | --- | --- | --- |
 | 1 | [stage1_map_selection](stage1_map_selection/README.md) | 맵별 성과 평가: 승률·시간 초과율·적 잔존 비율·승리 길이로 분석 대상 선정 |
 | 2 | [stage2_behavior_diagnostics](stage2_behavior_diagnostics/README.md) | 선택한 맵의 첫 사망·유형별 비공격 선택·사망 직전 동료 가시성 분석 |
+| 3 | [stage3_retreat_analysis](stage3_retreat_analysis/README.md) | 학습 H5와 정책 NPZ의 위험 상황·실제 거리 확보 후보·이후 경과 분석 |
 
-두 단계 모두 고정 체크포인트로 추론하며 `src/` 학습·정책 코드는 수정하지 않습니다.
+1·2단계는 고정 체크포인트로 추론하고, 3단계는 저장된 자료만 읽습니다. `src/` 학습·정책 코드는 수정하지 않습니다.
 
 ## Seed 확인
 
@@ -40,3 +41,16 @@ python experiment_analysis/stage2_behavior_diagnostics/collect_diagnostics.py \
 이전 평가 결과 없이 실행할 수 있으며 모델 SHA-256과 실제 환경 seed를 새로 기록합니다. `stage1_map_selection`의 평가 코드와 지표 모듈은 2단계가 재사용하므로 유지합니다.
 
 성과 기록과 원본 스텝 로그를 함께 저장하고 진단 표를 자동 생성합니다. 수집 원본은 `stage2_behavior_diagnostics/results/4s5z/<step>_<timestamp>/`, 분석 표는 그 아래 `analysis/window_5/comparison.md`에 저장합니다. 상세 지표·재분석 방법은 [2단계 README](stage2_behavior_diagnostics/README.md)를 참고하세요.
+
+## 3단계 실행
+
+```bash
+python -m experiment_analysis.stage3_retreat_analysis.analyze_retreats dataset \
+  --training-config "/path/to/training/run/config.json" \
+  --dataset-root dataset --maps 2s3z 2s4z 3s5z
+
+python -m experiment_analysis.stage3_retreat_analysis.analyze_retreats policy \
+  --run-dir "/path/to/stage2/3s5z/run" "/path/to/stage2/4s5z/run"
+```
+
+학습 H5의 자료 선택 규칙을 복원하고, 기존 정책 로그도 승패·쿨다운으로 제한하지 않고 분석합니다. 데이터에 없는 종료 유형이나 과거 무작위 학습 부분집합은 추측하지 않습니다. 결과 정의·옵션은 [3단계 README](stage3_retreat_analysis/README.md)를 참고하세요.
