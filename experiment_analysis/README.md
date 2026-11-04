@@ -5,8 +5,9 @@
 | 1 | [stage1_map_selection](stage1_map_selection/README.md) | 맵별 성과 평가: 승률·시간 초과율·적 잔존 비율·승리 길이로 분석 대상 선정 |
 | 2 | [stage2_behavior_diagnostics](stage2_behavior_diagnostics/README.md) | 선택한 맵의 첫 사망·유형별 비공격 선택·사망 직전 동료 가시성 분석 |
 | 3 | [stage3_retreat_analysis](stage3_retreat_analysis/README.md) | 학습 H5와 정책 NPZ의 위험 상황·실제 거리 확보 후보·이후 경과 분석 |
+| 4 | [stage4_policy_scores](stage4_policy_scores/README.md) | 원본 데이터 이력을 재구성하여 고정 모델의 이동·공격 점수와 정답 행동 순위 확인 |
 
-1·2단계는 고정 체크포인트로 추론하고, 3단계는 저장된 자료만 읽습니다. `src/` 학습·정책 코드는 수정하지 않습니다.
+1·2단계는 SC2에서 고정 체크포인트로 추론하고, 3단계는 저장된 자료만 읽습니다. 4단계는 SC2 실행 없이 데이터의 관측·이전 행동으로 신경망만 추론합니다. `src/` 학습·정책 코드는 수정하지 않습니다.
 
 ## Seed 확인
 
@@ -54,3 +55,14 @@ python -m experiment_analysis.stage3_retreat_analysis.analyze_retreats policy \
 ```
 
 학습 H5의 자료 선택 규칙을 복원하고, 기존 정책 로그도 승패·쿨다운으로 제한하지 않고 분석합니다. 데이터에 없는 종료 유형이나 과거 무작위 학습 부분집합은 추측하지 않습니다. 결과 정의·옵션은 [3단계 README](stage3_retreat_analysis/README.md)를 참고하세요.
+
+## 4단계 실행
+
+```bash
+python -m experiment_analysis.stage4_policy_scores.probe_action_scores probe \
+  --checkpoint-path "/path/to/training/run/models" --load-step 30000 \
+  --dataset-file dataset/3s5z/expert/qmix_2022-04-02_15-07-12/part_0.h5 \
+  --map 3s5z --episode 809 --agents 2 --steps 12 13 14 15 --device cpu
+```
+
+0스텝부터 전체 에이전트의 이력을 처리한 뒤 A2의 요청 구간을 저장합니다. 학습 당시 `config.json`이 필요합니다. 해시를 고정한 현재 실험 명령, 결과 해석, Mac용 prefix 추출 및 행동 개입의 선행 조건은 [4단계 README](stage4_policy_scores/README.md)를 참고하세요.
